@@ -42,7 +42,37 @@ jobs:
 
           # Allow RDP through Windows Firewall
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+       - name: Verify RDP is ready locally
+  shell: pwsh
+  run: |
+    Write-Host "Checking if RDP service is running..."
+    $service = Get-Service TermService
+    if ($service.Status -eq 'Running') {
+        Write-Host "RDP service is running."
+    } else {
+        Write-Host "RDP service is NOT running. Attempting to start..."
+        Start-Service TermService
+    }
 
+    Write-Host "Testing local port 3389 connectivity..."
+    $test = Test-NetConnection -ComputerName localhost -Port 3389 -WarningAction SilentlyContinue
+    if ($test.TcpTestSucceeded) {
+        Write-Host "✅ Port 3389 is listening locally."
+    } else {
+        Write-Host "❌ Port 3389 is NOT reachable locally."
+        Write-Host "Check firewall rules:"
+        Get-NetFirewallRule -DisplayGroup "Remote Desktop" | Format-Table Name, Enabled, Direction, Action
+    }
+
+    Write-Host "Firewall rule status for Remote Desktop:"
+    $rule = Get-NetFirewallRule -DisplayGroup "Remote Desktop" | Where-Object { $_.Enabled -eq 'True' }
+    if ($rule) {
+        Write-Host "Firewall rule is enabled."
+    } else {
+        Write-Host "Firewall rule is disabled. Enabling now..."
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    }
+    
       - name: Download ngrok
         run: |
           Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
