@@ -9,39 +9,39 @@ jobs:
     timeout-minutes: 720    # 12 hours max
 
     steps:
-      - name: Enable RDP
-        shell: pwsh
-        run: |
-          $username = "runneradmin"
-          $password = "Password123!"
-
-          # Create user only if missing
-          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
-            net user $username $password /add
-          } else {
-            Write-Host "User $username already exists, skipping creation."
-          }
-
-          # Add user to Remote Desktop Users group (if not already a member)
-          $group = "Remote Desktop Users"
-          $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
-          if (-not $members) {
-            Add-LocalGroupMember -Group $group -Member $username
-          } else {
-            Write-Host "User already in $group, skipping."
-          }
-
-          # Enable RDP (if not already enabled)
-          $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
-          if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
-            Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
-            Write-Host "RDP enabled."
-          } else {
-            Write-Host "RDP already enabled."
-          }
-
-          # Allow RDP through Windows Firewall
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+      - - name: Enable RDP
+  shell: pwsh
+  run: |
+    $username = "runneradmin"
+    $password = "Password123!"
+    
+    # Create user only if missing
+    if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
+      net user $username $password /add
+    } else {
+      Write-Host "User $username already exists, skipping creation."
+    }
+    
+    # Add user to Remote Desktop Users group (if not already a member)
+    $group = "Remote Desktop Users"
+    $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
+    if (-not $members) {
+      Add-LocalGroupMember -Group $group -Member $username
+    } else {
+      Write-Host "User already in $group, skipping."
+    }
+    
+    # Enable RDP if not already enabled
+    $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
+    if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
+      Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
+      Write-Host "RDP enabled."
+    } else {
+      Write-Host "RDP already enabled."
+    }
+    
+    # Allow RDP through Windows Firewall
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
        - name: Verify RDP is ready locally
   shell: pwsh
   run: |
