@@ -1,122 +1,64 @@
 name: Windows-12hr-RDP
 
 on:
-  workflow_dispatch:    # only manual trigger
+  workflow_dispatch:   # only manual trigger
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 720    # 12 hours max
+    timeout-minutes: 720   # 12 hours max
 
     steps:
-      - - name: Enable RDP
-  shell: pwsh
-  run: |
-    $username = "runneradmin"
-    $password = "Password123!"
-    
-    # Create user only if missing
-    if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
-      net user $username $password /add
-    } else {
-      Write-Host "User $username already exists, skipping creation."
-    }
-    
-    # Add user to Remote Desktop Users group (if not already a member)
-    $group = "Remote Desktop Users"
-    $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
-    if (-not $members) {
-      Add-LocalGroupMember -Group $group -Member $username
-    } else {
-      Write-Host "User already in $group, skipping."
-    }
-    
-    # Enable RDP if not already enabled
-    $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
-    if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
-      Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
-      Write-Host "RDP enabled."
-    } else {
-      Write-Host "RDP already enabled."
-    }
-    
-    # Allow RDP through Windows Firewall
-    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-       - name: Verify RDP is ready locally
-  shell: pwsh
-  run: |
-    Write-Host "Checking if RDP service is running..."
-    $service = Get-Service TermService
-    if ($service.Status -eq 'Running') {
-        Write-Host "RDP service is running."
-    } else {
-        Write-Host "RDP service is NOT running. Attempting to start..."
-        Start-Service TermService
-    }
-
-    Write-Host "Testing local port 3389 connectivity..."
-    $test = Test-NetConnection -ComputerName localhost -Port 3389 -WarningAction SilentlyContinue
-    if ($test.TcpTestSucceeded) {
-        Write-Host "✅ Port 3389 is listening locally."
-    } else {
-        Write-Host "❌ Port 3389 is NOT reachable locally."
-        Write-Host "Check firewall rules:"
-        Get-NetFirewallRule -DisplayGroup "Remote Desktop" | Format-Table Name, Enabled, Direction, Action
-    }
-
-    Write-Host "Firewall rule status for Remote Desktop:"
-    $rule = Get-NetFirewallRule -DisplayGroup "Remote Desktop" | Where-Object { $_.Enabled -eq 'True' }
-    if ($rule) {
-        Write-Host "Firewall rule is enabled."
-    } else {
-        Write-Host "Firewall rule is disabled. Enabling now..."
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-    }
-    
-      - name: Download ngrok
-        run: |
-          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-          Expand-Archive ngrok.zip -DestinationPath . -Force
-
-      - name: Start ngrok (background)
+      - name: Enable RDP
         shell: pwsh
-        env:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTHTOKEN }}   # store your token in GitHub secrets
         run: |
-          # Authenticate ngrok
-          .\ngrok.exe authtoken $env:NGROK_AUTH_TOKEN
+          $username = "runneradmin"
+          $password = "Password123!"
+          
+          # Create user only if missing
+          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
+            net user $username $password /add
+          } else {
+            Write-Host "User $username already exists, skipping creation."
+          }
+          
+          # Add user to Remote Desktop Users group (if not already a member)
+          $group = "Remote Desktop Users"
+          $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
+          if (-not $members) {
+            Add-LocalGroupMember -Group $group -Member $username
+          } else {
+            Write-Host "User already in $group, skipping."
+          }
+          
+          # Enable RDP if not already enabled
+          $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
+          if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
+            Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
+            Write-Host "RDP enabled."
+          } else {
+            Write-Host "RDP already enabled."
+          }
+          
+          # Allow RDP through Windows Firewall
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
-          # Start ngrok tunnel to port 3389 (RDP) in the background
-          Start-Process -NoNewWindow .\ngrok.exe -ArgumentList "tcp 3389"
-
-          # Give ngrok a few seconds to establish the tunnel
-          Start-Sleep -Seconds 5
-
-          # Query ngrok's local API to get the public URL
-          $tries = 0
-          $maxTries = 10
-          while ($tries -lt $maxTries) {
-            try {
-              $api = Invoke-RestMethod http://localhost:4040/api/tunnels -ErrorAction Stop
-              $url = $api.tunnels[0].public_url
-              Write-Host "========================================="
-              Write-Host "RDP tunnel is ready: $url"
-              Write-Host "Connect using any RDP client."
-              Write-Host "Username: runneradmin"
-              Write-Host "Password: Password123!"
-              Write-Host "========================================="
-              break
-            } catch {
-              $tries++
-              Write-Host "Waiting for ngrok API... ($tries/$maxTries)"
-              Start-Sleep -Seconds 3
-            }
+      - name: Verify RDP is ready locally
+        shell: pwsh
+        run: |
+          Write-Host "Checking if RDP service is running..."
+          $service = Get-Service TermService
+          if ($service.Status -eq 'Running') {
+              Write-Host "RDP service is running."
+          } else {
+              Write-Host "RDP service is NOT running. Attempting to start..."
+              Start-Service TermService
           }
 
-      - name: Keep job alive (12 hours)
-        shell: pwsh
-        run: |
-          Write-Host "Job will stay alive for up to 12 hours. Press Ctrl+C to stop manually."
-          while ($true) {
-            Start-Sleep -Seconds 300   # sleep 5 minutes
+          Write-Host "Testing local port 3389 connectivity..."
+          $test = Test-NetConnection -ComputerName localhost -Port 3389 -WarningAction SilentlyContinue
+          if ($test.TcpTestSucceeded) {
+              Write-Host "✅ Port 3389 is listening locally."
+          } else {
+              Write-Host "❌ Port 3389 is not reachable."
           }
