@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 720
+    timeout-minutes: 720    # 12 hours max
 
     steps:
       - name: Enable RDP
@@ -14,30 +14,77 @@ jobs:
         run: |
           $username = "runneradmin"
           $password = "Password123!"
+          
+          # Create user if missing
           if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
             net user $username $password /add
+            Write-Host "User $username created."
           } else {
-            Write-Host "User already exists, skipping creation."
+            Write-Host "User $username already exists."
           }
+          
+          # Add to Remote Desktop Users group if not already a member
           $group = "Remote Desktop Users"
           $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
           if (-not $members) {
             Add-LocalGroupMember -Group $group -Member $username
+            Write-Host "Added $username to $group."
+          } else {
+            Write-Host "$username is already in $group."
           }
+          
+          # Enable RDP registry setting
           $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
           if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
             Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
+            Write-Host "RDP enabled in registry."
+          } else {
+            Write-Host "RDP already enabled in registry."
           }
+          
+          # Allow RDP through Windows Firewall
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+          Write-Host "Firewall rule enabled for Remote Desktop."
 
-  - name: Get IP address
-    shell: pwsh
-    run: |
+      - name: Get IP address
+        shell: pwsh
+        run: |
+          # Get the IPv4 address of the runner (exclude loopback)
           $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"}).IPAddress
-          Write-Host "RDP connection IP: $ip" 
-    
-  - name: Verify RDP
-    shell: pwsh
-    run: |
-          Get-Service TermService | Select-Object Status
-          Test-NetConnection localhost -Port 3389
+          Write-Host "========================================="
+          Write-Host "🖥️  RDP Connection Details"
+          Write-Host "========================================="
+          Write-Host "IP Address: $ip"
+          Write-Host "Username:   runneradmin"
+          Write-Host "Password:   Password123!"
+          Write-Host "========================================="
+          Write-Host "Use Remote Desktop Client to connect."
+          Write-Host "This runner will stay alive for 12 hours."
+
+      - name: Verify RDP is ready
+        shell: pwsh
+        run: |
+          Write-Host "Checking RDP service status..."
+          $service = Get-Service TermService
+          if ($service.Status -eq 'Running') {
+              Write-Host "✅ RDP service is running."
+          } else {
+              Write-Host "⚠️ RDP service not running. Attempting to start..."
+              Start-Service TermService
+          }
+          
+          Write-Host "Testing local port 3389..."
+          $test = Test-NetConnection -ComputerName localhost -Port 3389 -WarningAction SilentlyContinue
+          if ($test.TcpTestSucceeded) {
+              Write-Host "✅ Port 3389 is listening."
+          } else {
+              Write-Host "❌ Port 3389 is not reachable."
+          }
+
+      # Optional: Keep the runner alive for the full 12 hours.
+      # Uncomment the next block if you want the session to stay active even when idle.
+      # - name: Keep alive (optional)
+      #   shell: pwsh
+      #   run: |
+      #     Write-Host "Keeping runner alive for 12 hours. Press Ctrl+C to stop early."
+      #     Start-Sleep -Seconds 43200
