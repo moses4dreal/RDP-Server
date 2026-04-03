@@ -1,12 +1,12 @@
 name: Windows-12hr-RDP
 
 on:
-  workflow_dispatch:   # only manual trigger
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 720   # 12 hours max
+    timeout-minutes: 720
 
     steps:
       - name: Enable RDP
@@ -14,51 +14,24 @@ jobs:
         run: |
           $username = "runneradmin"
           $password = "Password123!"
-          
-          # Create user only if missing
           if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
             net user $username $password /add
           } else {
-            Write-Host "User $username already exists, skipping creation."
+            Write-Host "User already exists, skipping creation."
           }
-          
-          # Add user to Remote Desktop Users group (if not already a member)
           $group = "Remote Desktop Users"
           $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
           if (-not $members) {
             Add-LocalGroupMember -Group $group -Member $username
-          } else {
-            Write-Host "User already in $group, skipping."
           }
-          
-          # Enable RDP if not already enabled
           $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
           if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
             Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
-            Write-Host "RDP enabled."
-          } else {
-            Write-Host "RDP already enabled."
           }
-          
-          # Allow RDP through Windows Firewall
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
-      - name: Verify RDP is ready locally
+      - name: Verify RDP
         shell: pwsh
         run: |
-          Write-Host "Checking if RDP service is running..."
-          $service = Get-Service TermService
-          if ($service.Status -eq 'Running') {
-              Write-Host "RDP service is running."
-          } else {
-              Write-Host "RDP service is NOT running. Attempting to start..."
-              Start-Service TermService
-          }
-
-          Write-Host "Testing local port 3389 connectivity..."
-          $test = Test-NetConnection -ComputerName localhost -Port 3389 -WarningAction SilentlyContinue
-          if ($test.TcpTestSucceeded) {
-              Write-Host "✅ Port 3389 is listening locally."
-          } else {
-              Write-Host "❌ Port 3389 is not reachable."
-          }
+          Get-Service TermService | Select-Object Status
+          Test-NetConnection localhost -Port 3389
