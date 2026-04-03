@@ -30,8 +30,14 @@ jobs:
           }
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
-      - name: Verify RDP
-        shell: pwsh
-        run: |
+  - name: Get IP address
+    shell: pwsh
+    run: |
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"}).IPAddress
+          Write-Host "RDP connection IP: $ip" 
+    
+  - name: Verify RDP
+    shell: pwsh
+    run: |
           Get-Service TermService | Select-Object Status
           Test-NetConnection localhost -Port 3389
