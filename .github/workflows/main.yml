@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 720    # 12 hours max
+    timeout-minutes: 720    # 12 hours
 
     steps:
       - name: Enable RDP
@@ -23,7 +23,7 @@ jobs:
             Write-Host "User $username already exists."
           }
           
-          # Add to Remote Desktop Users group if not already a member
+          # Add to Remote Desktop Users group if needed
           $group = "Remote Desktop Users"
           $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
           if (-not $members) {
@@ -33,7 +33,7 @@ jobs:
             Write-Host "$username is already in $group."
           }
           
-          # Enable RDP registry setting
+          # Enable RDP in registry
           $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
           if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
             Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
@@ -42,49 +42,45 @@ jobs:
             Write-Host "RDP already enabled in registry."
           }
           
-          # Allow RDP through Windows Firewall
+          # Allow RDP through firewall
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-          Write-Host "Firewall rule enabled for Remote Desktop."
+          Write-Host "Firewall rule enabled."
 
-      - name: Get IP address
+      - name: Expose RDP via ngrok
         shell: pwsh
+        env:
+          NGROK_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
-          # Get the IPv4 address of the runner (exclude loopback)
-          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notlike "*Loopback*"}).IPAddress
+          # Download ngrok
+          Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+          Expand-Archive -Path "ngrok.zip" -DestinationPath "."
+          
+          # Authenticate with token from secret
+          .\ngrok.exe authtoken $env:NGROK_TOKEN
+          
+          # Start ngrok tunnel on port 3389 in background
+          Start-Process -NoNewWindow -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389"
+          
+          # Wait for tunnel to establish
+          Start-Sleep -Seconds 8
+          
+          # Get public address from ngrok API
+          $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
+          $publicUrl = $response.tunnels[0].public_url
+          
           Write-Host "========================================="
-          Write-Host "🖥️  RDP Connection Details"
+          Write-Host "🌐 RDP Connection Details (via ngrok)"
           Write-Host "========================================="
-          Write-Host "IP Address: $ip"
+          Write-Host "Connect to: $publicUrl"
           Write-Host "Username:   runneradmin"
           Write-Host "Password:   Password123!"
           Write-Host "========================================="
-          Write-Host "Use Remote Desktop Client to connect."
-          Write-Host "This runner will stay alive for 12 hours."
+          Write-Host "This tunnel is active for up to 12 hours."
+          Write-Host "ngrok free tier limits: 1 tunnel, 40 connections/min."
 
-      - name: Verify RDP is ready
+      - name: Keep ngrok alive (optional)
         shell: pwsh
         run: |
-          Write-Host "Checking RDP service status..."
-          $service = Get-Service TermService
-          if ($service.Status -eq 'Running') {
-              Write-Host "✅ RDP service is running."
-          } else {
-              Write-Host "⚠️ RDP service not running. Attempting to start..."
-              Start-Service TermService
-          }
-          
-          Write-Host "Testing local port 3389..."
-          $test = Test-NetConnection -ComputerName localhost -Port 3389 -WarningAction SilentlyContinue
-          if ($test.TcpTestSucceeded) {
-              Write-Host "✅ Port 3389 is listening."
-          } else {
-              Write-Host "❌ Port 3389 is not reachable."
-          }
-
-      # Optional: Keep the runner alive for the full 12 hours.
-      # Uncomment the next block if you want the session to stay active even when idle.
-      # - name: Keep alive (optional)
-      #   shell: pwsh
-      #   run: |
-      #     Write-Host "Keeping runner alive for 12 hours. Press Ctrl+C to stop early."
-      #     Start-Sleep -Seconds 43200
+          Write-Host "Keeping runner alive for 12 hours. RDP remains accessible via ngrok."
+          Write-Host "Press Ctrl+C in GitHub Actions log to stop early."
+          Start-Sleep -Seconds 43200
