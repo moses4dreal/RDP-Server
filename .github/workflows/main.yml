@@ -4,88 +4,146 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  windows-rdp:
     runs-on: windows-latest
     timeout-minutes: 720
 
     steps:
-      - name: Enable RDP
+      - name: Enable Windows Remote Desktop
         shell: pwsh
         run: |
-          $username = "runneradmin"
-          $password = "Password123!"
-          
-          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
-            net user $username $password /add
-          }
-          $group = "Remote Desktop Users"
-          $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:DESKTOP-SPD0FJ4\$Administrator" }
-          if (-not $members) {
-            Add-LocalGroupMember -Group $group -Member $username
-          }
-          $rdpKey = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
-          if ((Get-ItemProperty -Path $rdpKey -Name "fDenyTSConnections").fDenyTSConnections -ne 0) {
-            Set-ItemProperty -Path $rdpKey -Name "fDenyTSConnections" -Value 0
-          }
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-          Write-Host "RDP enabled."
 
-      - name: Expose RDP via ngrok
+          $Username = "runneradmin"
+          $Password = "Password123!"
+
+          # Create or update user
+          if (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue) {
+              net user $Username $Password
+          }
+          else {
+              net user $Username $Password /add
+          }
+
+          # Administrator privileges
+          net localgroup Administrators $Username /add
+
+          # Remote Desktop Users
+          net localgroup "Remote Desktop Users" $Username /add
+
+          # Enable RDP
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          # Disable NLA (helps compatibility)
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 0
+
+          # Enable firewall rules
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          # Start Remote Desktop Service
+          Set-Service TermService -StartupType Automatic
+          Start-Service TermService
+
+          Write-Host ""
+          Write-Host "===== SERVICE STATUS ====="
+          Get-Service TermService
+
+          Write-Host ""
+          Write-Host "===== PORT STATUS ====="
+          netstat -ano | findstr :3389
+
+      - name: Install ngrok
         shell: pwsh
         env:
           NGROK_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
-          # Check if token is provided
-          if (-not $env:NGROK_TOKEN) {
-            Write-Error "NGROK_AUTH_TOKEN secret is not set or empty. Please add it in repository settings."
-            exit 1
-          }
-          
-          # Download ngrok
-          Write-Host "Downloading ngrok..."
-          Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
-          Expand-Archive -Path "ngrok.zip" -DestinationPath "."
-          
-          # Authenticate
-          Write-Host "Authenticating with ngrok..."
-          .\ngrok.exe authtoken $env:NGROK_TOKEN
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "ngrok authentication failed. Check your token."
-            exit 1
-          }
-          
-          # Start ngrok tunnel in background
-          Write-Host "Starting ngrok tunnel on port 3389..."
-          Start-Process -NoNewWindow -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389"
-          
-          # Wait for ngrok API to become available
-          Write-Host "Waiting for tunnel to be ready..."
-          $maxRetries = 15
-          $retryDelay = 2
-          for ($i = 0; $i -lt $maxRetries; $i++) {
-            Start-Sleep -Seconds $retryDelay
-            try {
-              $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -ErrorAction Stop
-              if ($response.tunnels.Count -gt 0) {
-                $publicUrl = $response.tunnels[0].public_url
-                Write-Host "========================================="
-                Write-Host "✅ RDP Tunnel Active"
-                Write-Host "========================================="
-                Write-Host "Connect to: $publicUrl"
-                Write-Host "Username:   runneradmin"
-                Write-Host "Password:   Password123!"
-                Write-Host "========================================="
-                exit 0
-              }
-            } catch {
-              Write-Host "Waiting for ngrok API (attempt $($i+1)/$maxRetries)..."
-            }
-          }
-          Write-Error "Ngrok tunnel did not start within expected time."
-          exit 1
 
-      - name: Keep alive (optional)
+          if (-not $env:NGROK_TOKEN) {
+              throw "Repository secret NGROK_AUTH_TOKEN is missing."
+          }
+
+          Invoke-WebRequest `
+            https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip `
+            -OutFile ngrok.zip
+
+          Expand-Archive ngrok.zip -DestinationPath .
+
+          .\ngrok.exe authtoken $env:NGROK_TOKEN
+
+      - name: Start ngrok TCP tunnel
         shell: pwsh
         run: |
-          Write-Host "Runner will stay alive for 12 hours. RDP accessible via ngrok."
-          Start-Sleep -Seconds 43200
+
+          Start-Process `
+            -FilePath ".\ngrok.exe" `
+            -ArgumentList "tcp 3389" `
+            -WindowStyle Hidden
+
+          Write-Host "Waiting for ngrok..."
+
+          $Tunnel = $null
+
+          for ($i=0; $i -lt 30; $i++) {
+
+              Start-Sleep 2
+
+              try {
+
+                  $Tunnel = Invoke-RestMethod `
+                    http://127.0.0.1:4040/api/tunnels
+
+                  if ($Tunnel.tunnels.Count -gt 0) {
+                      break
+                  }
+
+              }
+              catch {}
+
+          }
+
+          if (-not $Tunnel) {
+              throw "ngrok tunnel failed."
+          }
+
+          $Public = $Tunnel.tunnels[0].public_url
+
+          Write-Host ""
+          Write-Host "====================================="
+          Write-Host "RDP IS READY"
+          Write-Host "====================================="
+          Write-Host ""
+          Write-Host "Connect using:"
+          Write-Host ""
+          Write-Host $Public
+          Write-Host ""
+          Write-Host "Username : runneradmin"
+          Write-Host "Password : Password123!"
+          Write-Host ""
+          Write-Host "====================================="
+
+      - name: Verify tunnel
+        shell: pwsh
+        run: |
+
+          Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
+
+      - name: Keep runner alive
+        shell: pwsh
+        run: |
+
+          Write-Host ""
+          Write-Host "Runner will remain online for 12 hours."
+          Write-Host ""
+
+          for ($i=1; $i -le 720; $i++) {
+
+              Write-Host "Minute $i / 720"
+
+              Start-Sleep 60
+
+          }
