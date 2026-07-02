@@ -19,7 +19,7 @@ jobs:
             net user $username $password /add
           }
           $group = "Remote Desktop Users"
-          $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:COMPUTERNAME\$username" }
+          $members = Get-LocalGroupMember -Group $group | Where-Object { $_.Name -eq "$env:DESKTOP-SPD0FJ4\$Administrator" }
           if (-not $members) {
             Add-LocalGroupMember -Group $group -Member $username
           }
