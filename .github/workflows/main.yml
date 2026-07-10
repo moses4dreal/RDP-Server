@@ -1,4 +1,4 @@
-name: Windows-12hr-RDP
+name: Windows-24hr-RDP
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 720
+    timeout-minutes: 1440
 
     steps:
       - name: Enable Windows Remote Desktop
@@ -137,12 +137,12 @@ jobs:
         run: |
 
           Write-Host ""
-          Write-Host "Runner will remain online for 12 hours."
+          Write-Host "Runner will remain online for 24 hours."
           Write-Host ""
 
-          for ($i=1; $i -le 720; $i++) {
+          for ($i=1; $i -le 1440; $i++) {
 
-              Write-Host "Minute $i / 720"
+              Write-Host "Minute $i / 1440"
 
               Start-Sleep 60
 
